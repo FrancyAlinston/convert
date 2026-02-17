@@ -456,7 +456,8 @@ async function buildConvertPath (
       for (const format of supportedFormats) {
         if (!format.to) continue;
         if (!format.mime) continue;
-        if (path.some(c => c.format === format)) continue;
+        // Prevent cycles by comparing format properties, not object references
+        if (path.some(c => c.format.mime === format.mime && c.format.format === format.format)) continue;
         queue.push(path.concat({ format, handler }));
       }
     }
