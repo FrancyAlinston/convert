@@ -10,6 +10,9 @@ import mime from "mime";
 import normalizeMimeType from "../normalizeMimeType.ts";
 
 import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
+import logger from "../logger.ts";
+
+const log = logger.scoped("ImageMagick");
 
 class ImageMagickHandler implements FormatHandler {
 
@@ -21,10 +24,12 @@ class ImageMagickHandler implements FormatHandler {
 
   async init () {
 
+    log.info("Loading ImageMagick WASM...");
     const wasmLocation = "/convert/wasm/magick.wasm";
     const wasmBytes = await fetch(wasmLocation).then(r => r.bytes());
 
     await initializeImageMagick(wasmBytes);
+    log.info(`ImageMagick loaded, scanning supported formats...`);
 
     Magick.supportedFormats.forEach(format => {
       const formatName = format.format.toLowerCase();
@@ -59,6 +64,7 @@ class ImageMagickHandler implements FormatHandler {
     });
 
     this.ready = true;
+    log.info(`Ready with ${this.supportedFormats.length} formats`);
   }
 
   async doConvert (
@@ -66,6 +72,8 @@ class ImageMagickHandler implements FormatHandler {
     inputFormat: FileFormat,
     outputFormat: FileFormat
   ): Promise<FileData[]> {
+
+    log.debug(`Converting ${inputFormat.format} → ${outputFormat.format}`, { fileCount: inputFiles.length });
 
     const inputMagickFormat = inputFormat.internal as MagickFormat;
     const outputMagickFormat = outputFormat.internal as MagickFormat;

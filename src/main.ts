@@ -1,6 +1,9 @@
 import type { FileFormat, FileData, FormatHandler, ConvertPathNode } from "./FormatHandler.js";
 import normalizeMimeType from "./normalizeMimeType.js";
 import handlers from "./handlers";
+import logger, { LogLevel } from "./logger.js";
+
+const log = logger.scoped("Main");
 
 /** Maximum file size in bytes (500MB) */
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
@@ -116,6 +119,8 @@ const fileSelectHandler = (event: Event) => {
   if (!inputFiles) return;
   const files = Array.from(inputFiles);
   if (files.length === 0) return;
+
+  log.info(`File(s) selected: ${files.map(f => `${f.name} (${(f.size / 1024).toFixed(1)}KB, ${f.type || 'unknown type'})`).join(', ')}`);
 
   // Validate file sizes
   const oversizedFiles = files.filter(f => f.size > MAX_FILE_SIZE);
@@ -237,20 +242,24 @@ async function buildOptionList () {
   for (const handler of handlers) {
     if (!window.supportedFormatCache.has(handler.name)) {
       console.warn(`Cache miss for formats of handler "${handler.name}".`);
+      log.info(`Initializing handler "${handler.name}" (no cache)...`);
       try {
         await handler.init();
       } catch (error) {
         console.error(`Failed to initialize handler "${handler.name}":`, error);
+        log.error(`Failed to initialize handler "${handler.name}"`, error);
         continue;
       }
       if (handler.supportedFormats) {
         window.supportedFormatCache.set(handler.name, handler.supportedFormats);
         console.info(`Updated supported format cache for "${handler.name}".`);
+        log.info(`Cached ${handler.supportedFormats.length} formats for "${handler.name}"`);
       }
     }
     const supportedFormats = window.supportedFormatCache.get(handler.name);
     if (!supportedFormats) {
       console.warn(`Handler "${handler.name}" doesn't support any formats.`);
+      log.warn(`Handler "${handler.name}" has no supported formats`);
       continue;
     }
     for (const format of supportedFormats) {
@@ -334,9 +343,12 @@ async function buildOptionList () {
       "Missing supported format precache.\n\n" +
       "Consider saving the output of printSupportedFormatCache() to cache.json."
     );
+    log.warn("No cache.json found — handlers will initialize on demand");
   } finally {
     await buildOptionList();
+    const formatCount = allOptions.length;
     console.log("Built initial format list.");
+    log.info(`Ready — ${formatCount} format options loaded from ${handlers.length} handlers`);
     console.info(
       "%cℹ️ Browser-based conversions use software decoding.\n" +
       "Hardware acceleration warnings are normal and expected.",
@@ -392,6 +404,7 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
       if (!handler.ready) {
+        log.debug(`Lazy-initializing handler "${handler.name}"`);
         try {
           await handler.init();
         } catch (_) { return null; }
@@ -402,14 +415,29 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
       }
       if (!supportedFormats) throw `Handler "${handler.name}" doesn't support any formats.`;
       const inputFormat = supportedFormats.find(c => c.mime === path[i].format.mime && c.from)!;
+      
+      log.debug(`Converting step ${i + 1}: ${path[i].format.format} → ${path[i + 1].format.format} [${handler.name}]`);
+      const stepStart = performance.now();
+      
       files = await handler.doConvert(files, inputFormat, path[i + 1].format);
+      
+      const stepTime = ((performance.now() - stepStart) / 1000).toFixed(2);
+      log.info(`Step ${i + 1} completed in ${stepTime}s: ${path[i].format.format} → ${path[i + 1].format.format} (${files.length} file(s), ${files.reduce((s, f) => s + f.bytes.length, 0)} bytes)`);
+      
       if (files.some(c => !c.bytes.length)) throw "Output is empty.";
       convertPathCache.push({ files, node: path[i + 1] });
     } catch (e) {
-      // Improved error logging with context
+      // Log all conversion errors with context
       const errorMsg = String(e);
+      const pathStr = path.map(c => c.format.format).join(" → ");
       
-      // Only log detailed errors for non-common issues
+      log.error(`Conversion failed at step ${i + 1}: ${path[i].format.format} → ${path[i + 1].format.format}`, {
+        handler: handler.name,
+        path: pathStr,
+        error: errorMsg,
+      });
+      
+      // Only log verbose errors to console for non-common issues
       if (!errorMsg.includes("FS error") && !errorMsg.includes("hardware accelerated")) {
         console.log(path.map(c => c.format.format));
         console.error(handler.name, `${path[i].format.format} → ${path[i + 1].format.format}`, e);
@@ -519,6 +547,7 @@ function downloadFile (bytes: Uint8Array, name: string, mime: string) {
 // Cancel conversion handler
 window.cancelConversion = function () {
   conversionCancelled = true;
+  log.warn('Conversion cancelled by user');
   window.showPopup(`<h2>Conversion Cancelled</h2>
     <p>The conversion was stopped.</p>
     <button onclick="window.hidePopup()">OK</button>`);
@@ -554,6 +583,13 @@ ui.convertButton.onclick = async function () {
   const inputFormat = inputOption.format;
   const outputFormat = outputOption.format;
   
+  log.info(`Starting conversion: ${inputFormat.format} (${inputFormat.mime}) → ${outputFormat.format} (${outputFormat.mime})`, {
+    inputFiles: inputFiles.length,
+    totalSize: inputFiles.reduce((s, f) => s + f.size, 0),
+    inputHandler: inputOption.handler.name,
+    outputHandler: outputOption.handler.name,
+  });
+  
   // Reset cancellation flag
   conversionCancelled = false;
   const startTime = performance.now();
@@ -578,6 +614,7 @@ ui.convertButton.onclick = async function () {
     if (conversionCancelled) return;
     
     if (!output) {
+      log.error(`No conversion route found: ${inputFormat.format} → ${outputFormat.format}`);
       window.showPopup(`<h2>Conversion Failed</h2>
         <p>Could not find a conversion route from <b>${inputFormat.format}</b> to <b>${outputFormat.format}</b>.</p>
         <button onclick="window.hidePopup()">OK</button>`);
@@ -589,6 +626,12 @@ ui.convertButton.onclick = async function () {
     }
 
     const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+    log.info(`Conversion complete in ${elapsed}s: ${output.path.map(c => c.format.format).join(' → ')}`, {
+      outputFiles: output.files.length,
+      outputSize: output.files.reduce((s, f) => s + f.bytes.length, 0),
+      duration: elapsed,
+    });
 
     // Save to conversion history
     try {
@@ -606,6 +649,7 @@ ui.convertButton.onclick = async function () {
       // Keep only last 50 conversions
       localStorage.setItem('conversion-history', JSON.stringify(history.slice(0, 50)));
     } catch (error) {
+      log.warn('Failed to save conversion history', error);
       console.warn('Failed to save conversion history:', error);
     }
 
@@ -618,6 +662,7 @@ ui.convertButton.onclick = async function () {
 
   } catch (e) {
 
+    log.error('Unexpected conversion error', e);
     window.showPopup(`<h2>Conversion Error</h2>
       <p>An unexpected error occurred:</p>
       <p><code>${String(e).slice(0, 200)}</code></p>
@@ -658,6 +703,12 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     window.hidePopup();
   }
+  
+  // Ctrl+Shift+L to open log viewer
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'L') {
+    event.preventDefault();
+    window.showLogs();
+  }
 });
 
 // Add function to view conversion history
@@ -687,4 +738,80 @@ document.addEventListener('keydown', (event) => {
   } catch (error) {
     console.error('Failed to load conversion history:', error);
   }
+};
+
+// ====== Log Viewer ======
+
+const LOG_LEVEL_BADGE: Record<number, { label: string; color: string; bg: string }> = {
+  0: { label: "DBG", color: "#666", bg: "#eee" },
+  1: { label: "INF", color: "#1C77FF", bg: "#e6f0ff" },
+  2: { label: "WRN", color: "#956a00", bg: "#fff3cd" },
+  3: { label: "ERR", color: "#c0392b", bg: "#fde8e8" },
+};
+
+window.showLogs = function () {
+  const entries = logger.getEntries();
+  
+  const logRows = entries.map(e => {
+    const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, fractionalSecondDigits: 3 });
+    const badge = LOG_LEVEL_BADGE[e.level] || LOG_LEVEL_BADGE[0];
+    const dataStr = e.data !== undefined
+      ? `<pre style="margin:2px 0 0;font-size:0.75rem;color:#888;overflow-x:auto;max-width:100%">${
+          typeof e.data === 'string' ? e.data : JSON.stringify(e.data, null, 1)
+        }</pre>`
+      : "";
+    return `<tr style="border-bottom:1px solid #eee">
+      <td style="padding:4px 6px;font-size:0.75rem;color:#888;white-space:nowrap;vertical-align:top">${time}</td>
+      <td style="padding:4px 6px;vertical-align:top"><span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:0.7rem;font-weight:bold;color:${badge.color};background:${badge.bg}">${badge.label}</span></td>
+      <td style="padding:4px 6px;font-size:0.8rem;font-weight:bold;color:#555;white-space:nowrap;vertical-align:top">${e.category}</td>
+      <td style="padding:4px 6px;font-size:0.8rem;vertical-align:top">${e.message}${dataStr}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0">Debug Log</h2>
+      <span style="font-size:0.8rem;color:#888">${entries.length} entries</span>
+    </div>
+    <div style="max-height:50vh;overflow-y:auto;text-align:left;border:1px solid #ddd;border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-family:monospace">
+        <thead><tr style="background:#f5f5f5;position:sticky;top:0">
+          <th style="padding:6px;text-align:left;font-size:0.75rem">Time</th>
+          <th style="padding:6px;text-align:left;font-size:0.75rem">Level</th>
+          <th style="padding:6px;text-align:left;font-size:0.75rem">Source</th>
+          <th style="padding:6px;text-align:left;font-size:0.75rem">Message</th>
+        </tr></thead>
+        <tbody>${logRows || '<tr><td colspan="4" style="padding:20px;text-align:center;color:#888">No log entries yet</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+      <button onclick="window.exportLogs()">Export Logs</button>
+      <button onclick="window.hidePopup()">Close</button>
+    </div>
+    <p style="font-size:0.75rem;color:#888;margin-top:8px">Shortcut: Ctrl+Shift+L</p>
+  `;
+
+  window.showPopup(html);
+  
+  // Make the popup wider for the log viewer
+  ui.popupBox.style.width = "clamp(400px, 70vw, 900px)";
+  // Restore default width when closed
+  const origHide = window.hidePopup;
+  window.hidePopup = function () {
+    ui.popupBox.style.width = "";
+    window.hidePopup = origHide;
+    origHide();
+  };
+};
+
+window.exportLogs = function () {
+  const logData = logger.export();
+  const blob = new Blob([logData], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `convert-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  log.info("Logs exported to file");
 };

@@ -1,4 +1,7 @@
 import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
+import logger from "../logger.ts";
+
+const log = logger.scoped("CanvasToBlob");
 
 class canvasToBlobHandler implements FormatHandler {
 
@@ -81,6 +84,8 @@ class canvasToBlobHandler implements FormatHandler {
     if (!this.#canvas || !this.#ctx) {
       throw "Handler not initialized.";
     }
+
+    log.debug(`Converting ${inputFormat.format} → ${outputFormat.format}`, { fileCount: inputFiles.length });
 
     const outputFiles: FileData[] = [];
     for (const inputFile of inputFiles) {

@@ -1,5 +1,8 @@
 import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import logger from "../logger.ts";
+
+const log = logger.scoped("SQLite");
 
 class sqlite3Handler implements FormatHandler {
 
@@ -50,7 +53,7 @@ class sqlite3Handler implements FormatHandler {
     outputFormat: FileFormat
   ): Promise<FileData[]> {
     const outputFiles: FileData[] = [];
-    console.log(inputFormat, outputFormat);
+    log.debug(`Converting ${inputFormat.internal} → ${outputFormat.internal}`, { fileCount: inputFiles.length });
 
     const sqlite3 = await sqlite3InitModule();
 

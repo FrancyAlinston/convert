@@ -7,6 +7,8 @@ declare global {
     showPopup: (html: string) => void;
     hidePopup: () => void;
     cancelConversion: () => void;
+    showLogs: () => void;
+    exportLogs: () => void;
   }
 }
 

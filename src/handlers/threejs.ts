@@ -3,6 +3,9 @@ import type { FileData, FileFormat, FormatHandler } from "../FormatHandler.ts";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
+import logger from "../logger.ts";
+
+const log = logger.scoped("ThreeJS");
 
 class threejsHandler implements FormatHandler {
 
@@ -52,6 +55,7 @@ class threejsHandler implements FormatHandler {
   private renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 
   async init () {
+    log.info("Initializing WebGL renderer (1920x1080, antialiased)");
     this.renderer.setSize(1920, 1080);
     this.renderer.setPixelRatio(1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -83,6 +87,8 @@ class threejsHandler implements FormatHandler {
       const blob = new Blob([inputFile.bytes as BlobPart]);
       const url = URL.createObjectURL(blob);
 
+      log.debug(`Loading GLB model: ${inputFile.name} (${(inputFile.bytes.length / 1024).toFixed(1)}KB)`);
+
       const gltf: GLTF = await new Promise((resolve, reject) => {
         const loader = new GLTFLoader();
         loader.load(url, resolve, undefined, reject);
@@ -96,6 +102,8 @@ class threejsHandler implements FormatHandler {
       const size = bbox.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       const distance = maxDim * 1.5;
+
+      log.debug(`Model loaded — bounding box: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}, camera distance: ${distance.toFixed(2)}`);
 
       this.camera.position.set(
         center.x + distance * 0.5,

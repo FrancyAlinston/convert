@@ -5,6 +5,9 @@ import type { LogEvent } from "@ffmpeg/ffmpeg";
 
 import mime from "mime";
 import normalizeMimeType from "../normalizeMimeType.ts";
+import logger, { LogLevel } from "../logger.ts";
+
+const log = logger.scoped("FFmpeg");
 
 class FFmpegHandler implements FormatHandler {
 
@@ -25,39 +28,26 @@ class FFmpegHandler implements FormatHandler {
    * Filter out repetitive warning messages to reduce console spam.
    * @param log Log event from FFmpeg
    */
-  handleFilteredLog (log: LogEvent) {
-    const msg = log.message;
+  handleFilteredLog (log_event: LogEvent) {
+    const msg = log_event.message;
     
     // Suppress hardware acceleration warnings (these are expected in browser)
     if (msg.includes("hardware accelerated") || msg.includes("suppport hardware")) {
-      const key = msg.trim();
-      const count = this.#warningCount.get(key) || 0;
-      
-      // Only log the first occurrence
-      if (count === 0) {
-        console.warn("[FFmpeg] Hardware acceleration not available (browser limitation - using software decoding)");
-        this.#warningCount.set(key, 1);
-      }
-      return; // Don't log to console
+      log.logOnce(LogLevel.WARN, "Hardware acceleration not available (browser limitation - using software decoding)", "hw-accel");
+      return;
     }
     
     // Suppress FS error spam
     if (msg.includes("FS error")) {
-      const key = "FS error";
-      const count = this.#warningCount.get(key) || 0;
-      if (count === 0) {
-        console.warn("[FFmpeg] File system errors detected (may affect some conversions)");
-        this.#warningCount.set(key, 1);
-      }
+      log.logOnce(LogLevel.WARN, "File system errors detected (may affect some conversions)", "fs-error");
       return;
     }
     
     // Log everything else normally
-    if (log.type === 'fferr') {
-      console.error("[FFmpeg]", msg);
+    if (log_event.type === 'fferr') {
+      log.error(msg);
     } else if (msg.trim()) {
-      // Only log non-empty messages
-      console.log("[FFmpeg]", msg);
+      log.debug(msg);
     }
   }
   clearStdout () {
@@ -118,12 +108,14 @@ class FFmpegHandler implements FormatHandler {
         return await this.execSafe(args, timeout, attempts - 1);
       }
       console.error(e);
+      log.error("Execution failed", { args, error: String(e), attemptsLeft: attempts - 1 });
       throw e;
     }
   }
 
   async init () {
 
+    log.info("Initializing FFmpeg WASM...");
     this.#ffmpeg = new FFmpeg();
     
     // Set up filtered logging to reduce console spam
