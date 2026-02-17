@@ -1,0 +1,5 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "git -C \"c:\\Users\\franc\\Pictures\\Projects\\Convert\\convert\"": true
+    }
+}
