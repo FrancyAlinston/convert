@@ -1,7 +1,40 @@
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: lightgray;
+  --bg-tertiary: rgb(184, 184, 184);
+  --text-primary: #000000;
+  --text-secondary: #333333;
+  --popup-bg: white;
+  --button-bg: lightgray;
+  --button-text: black;
+  --shadow-color: rgba(169, 169, 169, 0.4);
+  --search-shadow: darkgrey;
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --text-primary: #e0e0e0;
+    --text-secondary: #b0b0b0;
+    --popup-bg: #1a1a2e;
+    --button-bg: #2a2a4a;
+    --button-text: #e0e0e0;
+    --shadow-color: rgba(0, 0, 0, 0.4);
+    --search-shadow: #0a0a1a;
+    --overlay-bg: rgba(0, 0, 0, 0.7);
+  }
+}
+
 body {
   margin: 0;
   font-family: sans-serif;
   --highlight-color: #1C77FF;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s, color 0.3s;
 }
 
 #file-input {
@@ -18,6 +51,13 @@ body {
   color: white;
   text-align: center;
   cursor: pointer;
+  transition: background-color 0.2s, border 0.2s;
+  border: 3px solid transparent;
+}
+
+#file-area.drag-over {
+  background-color: color-mix(in srgb, var(--highlight-color) 70%, white);
+  border: 3px dashed white;
 }
 
 #file-area h2,
@@ -42,12 +82,13 @@ body {
   padding: 10px 20px;
   border: 0;
   border-radius: 10px;
-  background-color: white;
+  background-color: var(--bg-primary);
   color: var(--highlight-color);
   font-weight: bold;
   cursor: pointer;
-  box-shadow: 0 5px 0 0 rgba(169, 169, 169, 0.4);
+  box-shadow: 0 5px 0 0 var(--shadow-color);
   pointer-events: all;
+  transition: background-color 0.3s;
 }
 #side-panel button:active {
   transform: translateY(5px);
@@ -72,10 +113,10 @@ body {
 }
 
 #from-container {
-  background-color: lightgray;
+  background-color: var(--bg-secondary);
 }
 #to-container {
-  background-color: rgb(184, 184, 184);
+  background-color: var(--bg-tertiary);
 }
 
 .search {
@@ -85,7 +126,10 @@ body {
   border: 0;
   border-radius: 5px;
   outline: none;
-  box-shadow: 0 5px 0 0 darkgrey;
+  box-shadow: 0 5px 0 0 var(--search-shadow);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s, color 0.3s;
 }
 
 .format-list {
@@ -93,23 +137,35 @@ body {
   flex-flow: column nowrap;
   width: 100%;
   align-items: center;
-  background-color: white;
+  background-color: var(--bg-primary);
   border-radius: 10px;
   padding: 30px;
   margin-bottom: 5vw;
+  transition: background-color 0.3s;
 }
 
 .format-list button {
   width: 80%;
   margin: 5px 0;
   padding: 10px;
-  color: black;
-  background-color: lightgray;
+  color: var(--text-primary);
+  background-color: var(--button-bg);
   border: 0;
   border-radius: 10px;
   font-family: monospace;
   word-break: break-word;
   cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, transform 0.1s;
+}
+
+.format-list button:hover {
+  transform: scale(1.02);
+  filter: brightness(1.1);
+}
+
+.format-list button:focus-visible {
+  outline: 2px solid var(--highlight-color);
+  outline-offset: 2px;
 }
 
 button.selected {
@@ -143,18 +199,21 @@ button.selected {
   top: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--overlay-bg);
 }
 #popup {
   position: fixed;
   left: 50%;
   top: 50%;
-  width: 20vw;
+  width: clamp(300px, 30vw, 500px);
   transform: translate(-50%, -50%);
-  background-color: white;
-  padding: 15px;
-  border-radius: 10px;
+  background-color: var(--popup-bg);
+  color: var(--text-primary);
+  padding: 20px 25px;
+  border-radius: 12px;
   text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.3s;
 }
 
 #popup button {
@@ -162,16 +221,57 @@ button.selected {
   padding: 7px 20px;
   border: 0;
   border-radius: 10px;
-  background-color: lightgray;
-  color: black;
+  background-color: var(--button-bg);
+  color: var(--text-primary);
   cursor: pointer;
+  transition: filter 0.2s;
+}
+
+#popup button:hover {
+  filter: brightness(1.15);
+}
+
+#popup button.cancel-btn {
+  background-color: #e74c3c;
+  color: white;
+  margin-top: 10px;
+}
+
+#popup button.cancel-btn:hover {
+  background-color: #c0392b;
 }
 
 #popup progress {
   width: 100%;
   height: 20px;
   margin: 15px 0;
-  border-radius: 5px;
+  border-radius: 10px;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--button-bg);
+}
+
+#popup progress::-webkit-progress-bar {
+  background-color: var(--button-bg);
+  border-radius: 10px;
+}
+
+#popup progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--highlight-color), color-mix(in srgb, var(--highlight-color) 70%, white));
+  border-radius: 10px;
+  transition: width 0.3s ease;
+}
+
+#popup progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--highlight-color), color-mix(in srgb, var(--highlight-color) 70%, white));
+  border-radius: 10px;
+}
+
+#popup .conversion-time {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 5px;
 }
 
 .spinner {

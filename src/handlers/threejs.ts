@@ -49,10 +49,25 @@ class threejsHandler implements FormatHandler {
 
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(90, 16 / 9, 0.1, 4096);
-  private renderer = new THREE.WebGLRenderer();
+  private renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 
   async init () {
-    this.renderer.setSize(960, 540);
+    this.renderer.setSize(1920, 1080);
+    this.renderer.setPixelRatio(1);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Add proper lighting so models aren't rendered black
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    this.scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight.position.set(5, 10, 7);
+    this.scene.add(directionalLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    fillLight.position.set(-5, 0, -5);
+    this.scene.add(fillLight);
+
     this.ready = true;
   }
 
@@ -73,12 +88,37 @@ class threejsHandler implements FormatHandler {
         loader.load(url, resolve, undefined, reject);
       });
 
+      URL.revokeObjectURL(url);
+
+      // Auto-frame the model: compute bounding box and position camera
       const bbox = new THREE.Box3().setFromObject(gltf.scene);
-      this.camera.position.z = bbox.max.z * 2;
+      const center = bbox.getCenter(new THREE.Vector3());
+      const size = bbox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const distance = maxDim * 1.5;
+
+      this.camera.position.set(
+        center.x + distance * 0.5,
+        center.y + distance * 0.3,
+        center.z + distance
+      );
+      this.camera.lookAt(center);
 
       this.scene.add(gltf.scene);
       this.renderer.render(this.scene, this.camera);
       this.scene.remove(gltf.scene);
+
+      // Dispose of loaded geometry/materials to free GPU memory
+      gltf.scene.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry?.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material?.dispose();
+          }
+        }
+      });
 
       const bytes: Uint8Array = await new Promise((resolve, reject) => {
         this.renderer.domElement.toBlob((blob) => {

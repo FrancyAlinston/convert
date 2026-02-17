@@ -3,47 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="description" content="Convert files between formats directly in your browser. No uploads, complete privacy. Supports images, video, audio, documents, 3D models, and more.">
+  <meta name="theme-color" content="#1C77FF" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Convert to it!">
+  <meta property="og:description" content="Browser-based universal file converter. No uploads, complete privacy.">
+  <meta property="og:type" content="website">
   <link rel="stylesheet" href="style.css">
   <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
   <title>Convert to it!</title>
 </head>
 <body>
 
-  <input id="file-input" type="file">
+  <input id="file-input" type="file" aria-label="Select file to convert">
 
-  <div id="file-area">
+  <div id="file-area" role="button" tabindex="0" aria-label="Click or drop files here to add them for conversion">
     <h2>Click to add your file</h2>
     <p id="drop-hint-text">or drag and drop it here</p>
   </div>
   <div id="side-panel">
-    <button id="mode-button">Advanced mode</button>
+    <button id="mode-button" aria-label="Toggle between simple and advanced mode">Advanced mode</button>
   </div>
 
   <div id="format-containers">
 
     <div id="from-container" class="format-container">
       <h2>Convert from:</h2>
-      <input type="text" id="search-from" class="search" placeholder="Search">
-      <div id="from-list" class="format-list">
+      <input type="text" id="search-from" class="search" placeholder="Search" aria-label="Search input formats">
+      <div id="from-list" class="format-list" role="listbox" aria-label="Available input formats">
 
       </div>
     </div>
 
     <div id="to-container" class="format-container">
       <h2>Convert to:</h2>
-      <input type="text" id="search-to" class="search" placeholder="Search">
-      <div id="to-list" class="format-list">
+      <input type="text" id="search-to" class="search" placeholder="Search" aria-label="Search output formats">
+      <div id="to-list" class="format-list" role="listbox" aria-label="Available output formats">
 
       </div>
     </div>
 
   </div>
 
-  <button id="convert-button" class="disabled">Convert</button>
+  <button id="convert-button" class="disabled" aria-label="Start conversion">Convert</button>
 
-  <div id="popup-bg"></div>
-  <div id="popup">
+  <div id="popup-bg" aria-hidden="true"></div>
+  <div id="popup" role="dialog" aria-live="polite">
     <h2>Loading tools...</h2>
+    <div class="spinner"></div>
   </div>
 
   <script type="module" src="src/main.ts"></script>

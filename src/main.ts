@@ -7,6 +7,9 @@ const MAX_FILE_SIZE = 500 * 1024 * 1024;
 
 /** Files currently selected for conversion */
 let selectedFiles: File[] = [];
+
+/** Flag to cancel in-progress conversion */
+let conversionCancelled = false;
 /**
  * Whether to use "simple" mode.
  * - In **simple** mode, the input/output lists are grouped by file format.
@@ -81,6 +84,13 @@ ui.outputSearch.oninput = searchHandler;
 ui.fileSelectArea.onclick = () => {
   ui.fileInput.click();
 };
+// Allow keyboard activation (Enter/Space) for the file area
+ui.fileSelectArea.onkeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    ui.fileInput.click();
+  }
+};
 
 /**
  * Validates and stores user selected files. Works for both manual
@@ -111,11 +121,18 @@ const fileSelectHandler = (event: Event) => {
   const oversizedFiles = files.filter(f => f.size > MAX_FILE_SIZE);
   if (oversizedFiles.length > 0) {
     const sizeInMB = (oversizedFiles[0].size / 1024 / 1024).toFixed(1);
-    return alert(`File "${oversizedFiles[0].name}" is too large (${sizeInMB}MB).\nMaximum file size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+    window.showPopup(`<h2>File Too Large</h2>
+      <p>"${oversizedFiles[0].name}" is ${sizeInMB}MB.</p>
+      <p>Maximum file size: ${MAX_FILE_SIZE / 1024 / 1024}MB</p>
+      <button onclick="window.hidePopup()">OK</button>`);
+    return;
   }
 
   if (files.some(c => c.type !== files[0].type)) {
-    return alert("All input files must be of the same type.");
+    window.showPopup(`<h2>Format Mismatch</h2>
+      <p>All input files must be of the same type.</p>
+      <button onclick="window.hidePopup()">OK</button>`);
+    return;
   }
   files.sort((a, b) => a.name === b.name ? 0 : (a.name < b.name ? -1 : 1));
   selectedFiles = files;
@@ -165,8 +182,21 @@ const fileSelectHandler = (event: Event) => {
 // Add the file selection handler to both the file input element and to
 // the window as a drag-and-drop event, and to the clipboard paste event.
 ui.fileInput.addEventListener("change", fileSelectHandler);
-window.addEventListener("drop", fileSelectHandler);
-window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  ui.fileSelectArea.classList.remove("drag-over");
+  fileSelectHandler(e);
+});
+window.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  ui.fileSelectArea.classList.add("drag-over");
+});
+window.addEventListener("dragleave", (e) => {
+  // Only remove if leaving the window
+  if (!e.relatedTarget) {
+    ui.fileSelectArea.classList.remove("drag-over");
+  }
+});
 window.addEventListener("paste", fileSelectHandler);
 
 /**
@@ -336,13 +366,19 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
 
   ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
     <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>
-    <div class="spinner"></div>`;
+    <div class="spinner"></div>
+    <button class="cancel-btn" onclick="window.cancelConversion()">Cancel</button>`;
 
   const cacheLast = convertPathCache.at(-1);
   if (cacheLast) files = cacheLast.files;
 
   const start = cacheLast ? convertPathCache.length : 0;
   for (let i = start; i < path.length - 1; i ++) {
+    // Check for cancellation
+    if (conversionCancelled) {
+      return null;
+    }
+
     const handler = path[i + 1].handler;
     
     // Update progress
@@ -350,7 +386,8 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
     ui.popupBox.innerHTML = `<h2>Converting... ${progress}%</h2>
       <p>Step ${i + 1}/${path.length - 1}: <b>${path[i].format.format} → ${path[i + 1].format.format}</b></p>
       <progress value="${progress}" max="100"></progress>
-      <div class="spinner"></div>`;
+      <div class="spinner"></div>
+      <button class="cancel-btn" onclick="window.cancelConversion()">Cancel</button>`;
     
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
@@ -479,25 +516,47 @@ function downloadFile (bytes: Uint8Array, name: string, mime: string) {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
+// Cancel conversion handler
+window.cancelConversion = function () {
+  conversionCancelled = true;
+  window.showPopup(`<h2>Conversion Cancelled</h2>
+    <p>The conversion was stopped.</p>
+    <button onclick="window.hidePopup()">OK</button>`);
+};
+
 ui.convertButton.onclick = async function () {
 
   const inputFiles = selectedFiles;
 
   if (inputFiles.length === 0) {
-    return alert("Select an input file.");
+    window.showPopup(`<h2>No File Selected</h2><p>Please select an input file first.</p>
+      <button onclick="window.hidePopup()">OK</button>`);
+    return;
   }
 
   const inputButton = document.querySelector("#from-list .selected");
-  if (!inputButton) return alert("Specify input file format.");
+  if (!inputButton) {
+    window.showPopup(`<h2>No Input Format</h2><p>Please specify the input file format.</p>
+      <button onclick="window.hidePopup()">OK</button>`);
+    return;
+  }
 
   const outputButton = document.querySelector("#to-list .selected");
-  if (!outputButton) return alert("Specify output file format.");
+  if (!outputButton) {
+    window.showPopup(`<h2>No Output Format</h2><p>Please specify the output file format.</p>
+      <button onclick="window.hidePopup()">OK</button>`);
+    return;
+  }
 
   const inputOption = allOptions[Number(inputButton.getAttribute("format-index"))];
   const outputOption = allOptions[Number(outputButton.getAttribute("format-index"))];
 
   const inputFormat = inputOption.format;
   const outputFormat = outputOption.format;
+  
+  // Reset cancellation flag
+  conversionCancelled = false;
+  const startTime = performance.now();
 
   try {
 
@@ -512,18 +571,24 @@ ui.convertButton.onclick = async function () {
       inputFileData.push({ name: inputFile.name, bytes: inputBytes });
     }
 
-    window.showPopup("<h2>Finding conversion route...</h2>");
+    window.showPopup("<h2>Finding conversion route...</h2><div class=\"spinner\"></div>");
 
     const output = await buildConvertPath(inputFileData, outputOption, [[inputOption]]);
+    
+    if (conversionCancelled) return;
+    
     if (!output) {
-      window.hidePopup();
-      alert("Failed to find conversion route.");
+      window.showPopup(`<h2>Conversion Failed</h2>
+        <p>Could not find a conversion route from <b>${inputFormat.format}</b> to <b>${outputFormat.format}</b>.</p>
+        <button onclick="window.hidePopup()">OK</button>`);
       return;
     }
 
     for (const file of output.files) {
       downloadFile(file.bytes, file.name, outputFormat.mime);
     }
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
 
     // Save to conversion history
     try {
@@ -535,7 +600,8 @@ ui.convertButton.onclick = async function () {
         to: outputOption.format.format,
         toMime: outputFormat.mime,
         files: output.files.length,
-        path: output.path.map(c => c.format.format).join(' → ')
+        path: output.path.map(c => c.format.format).join(' \u2192 '),
+        duration: elapsed
       });
       // Keep only last 50 conversions
       localStorage.setItem('conversion-history', JSON.stringify(history.slice(0, 50)));
@@ -544,15 +610,18 @@ ui.convertButton.onclick = async function () {
     }
 
     window.showPopup(
-      `<h2>Converted ${inputOption.format.format} to ${outputOption.format.format}!</h2>` +
-      `<p>Path used: <b>${output.path.map(c => c.format.format).join(" → ")}</b>.</p>\n` +
+      `<h2>Converted ${inputOption.format.format.toUpperCase()} to ${outputOption.format.format.toUpperCase()}!</h2>` +
+      `<p>Path: <b>${output.path.map(c => c.format.format).join(" \u2192 ")}</b></p>` +
+      `<p class="conversion-time">Completed in ${elapsed}s</p>` +
       `<button onclick="window.hidePopup()">OK</button>`
     );
 
   } catch (e) {
 
-    window.hidePopup();
-    alert("Unexpected error while routing:\n" + e);
+    window.showPopup(`<h2>Conversion Error</h2>
+      <p>An unexpected error occurred:</p>
+      <p><code>${String(e).slice(0, 200)}</code></p>
+      <button onclick="window.hidePopup()">OK</button>`);
     console.error(e);
 
   }
