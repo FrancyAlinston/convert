@@ -23,10 +23,8 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    /* Temporary fix!!! This is only really a problem in dependencies. */
-    /* Not sure how to best handle this in the long term, though. */
-    "noUnusedLocals": false, /* SHOULD be true */
-    "noUnusedParameters": false, /* SHOULD be true */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     /**
      * The TS transpilation of the qoi-fu dependency isn't compabile with
      * our settings. They do provide a JS file, but tsc _really_ wants to

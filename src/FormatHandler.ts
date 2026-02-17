@@ -1,3 +1,6 @@
+/**
+ * Represents a file format specification with metadata for conversion.
+ */
 export interface FileFormat {
   /** Format description (long name) for displaying to the user. */
   name: string;
@@ -15,6 +18,9 @@ export interface FileFormat {
   internal: string;
 }
 
+/**
+ * Represents a file with its name and binary content.
+ */
 export interface FileData {
   /** File name with extension. */
   name: string;
@@ -30,37 +36,59 @@ export interface FileData {
 
 /**
  * Establishes a common interface for converting between file formats.
- * Often a "wrapper" for existing tools.
+ * Often a "wrapper" for existing tools (FFmpeg, ImageMagick, etc.).
+ * 
+ * @example
+ * ```typescript
+ * class MyHandler implements FormatHandler {
+ *   public name = "MyTool";
+ *   public ready = false;
+ *   
+ *   async init() {
+ *     // Initialize your tool
+ *     this.ready = true;
+ *   }
+ *   
+ *   async doConvert(inputFiles, inputFormat, outputFormat) {
+ *     // Perform conversion
+ *     return outputFiles;
+ *   }
+ * }
+ * ```
  */
 export interface FormatHandler {
-  /** Name of the tool being wrapped (e.g. "FFmpeg"). */
+  /** Name of the tool being wrapped (e.g. "FFmpeg", "ImageMagick"). */
   name: string;
   /** List of supported input/output {@link FileFormat}s. */
   supportedFormats?: FileFormat[];
 
-  /** Whether the handler supports input of any type.
+  /**
+   * Whether the handler supports input of any type.
    * Conversion using this handler will be performed only if no other direct conversion is found.
    */
   supportAnyInput?: boolean;
 
   /**
-   * Whether the handler is ready for use. Should be set in {@link init}.
-   * If true, {@link doConvert} is expected to work.
+   * Whether the handler is ready for use. Should be set to `true` in {@link init}.
+   * If true, {@link doConvert} is expected to work without errors.
    */
   ready: boolean;
+  
   /**
-   * Initializes the handler if necessary.
-   * Should set {@link ready} to true.
+   * Initializes the handler if necessary (load WASM, prepare resources, etc.).
+   * Should set {@link ready} to true upon successful initialization.
+   * @throws {Error} If initialization fails
    */
   init: () => Promise<void>;
+  
   /**
    * Performs the actual file conversion.
    * @param inputFiles Array of {@link FileData} entries, one per input file.
    * @param inputFormat Input {@link FileFormat}, the same for all inputs.
    * @param outputFormat Output {@link FileFormat}, the same for all outputs.
-   * @param args Optional arguments as a string array.
-   * Can be used to perform recursion with different settings.
+   * @param args Optional arguments as a string array. Can be used to perform recursion with different settings.
    * @returns Array of {@link FileData} entries, one per generated output file.
+   * @throws {Error} If conversion fails
    */
   doConvert: (
     inputFiles: FileData[],
@@ -70,6 +98,9 @@ export interface FormatHandler {
   ) => Promise<FileData[]>;
 }
 
+/**
+ * Represents a node in the conversion path, combining a handler and its target format.
+ */
 export class ConvertPathNode {
   public handler: FormatHandler;
   public format: FileFormat;

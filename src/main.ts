@@ -2,6 +2,9 @@ import type { FileFormat, FileData, FormatHandler, ConvertPathNode } from "./For
 import normalizeMimeType from "./normalizeMimeType.js";
 import handlers from "./handlers";
 
+/** Maximum file size in bytes (500MB) */
+const MAX_FILE_SIZE = 500 * 1024 * 1024;
+
 /** Files currently selected for conversion */
 let selectedFiles: File[] = [];
 /**
@@ -104,6 +107,13 @@ const fileSelectHandler = (event: Event) => {
   const files = Array.from(inputFiles);
   if (files.length === 0) return;
 
+  // Validate file sizes
+  const oversizedFiles = files.filter(f => f.size > MAX_FILE_SIZE);
+  if (oversizedFiles.length > 0) {
+    const sizeInMB = (oversizedFiles[0].size / 1024 / 1024).toFixed(1);
+    return alert(`File "${oversizedFiles[0].name}" is too large (${sizeInMB}MB).\nMaximum file size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+  }
+
   if (files.some(c => c.type !== files[0].type)) {
     return alert("All input files must be of the same type.");
   }
@@ -199,7 +209,10 @@ async function buildOptionList () {
       console.warn(`Cache miss for formats of handler "${handler.name}".`);
       try {
         await handler.init();
-      } catch (_) { continue; }
+      } catch (error) {
+        console.error(`Failed to initialize handler "${handler.name}":`, error);
+        continue;
+      }
       if (handler.supportedFormats) {
         window.supportedFormatCache.set(handler.name, handler.supportedFormats);
         console.info(`Updated supported format cache for "${handler.name}".`);
@@ -317,7 +330,8 @@ const convertPathCache: Array<{
 async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
 
   ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
-    <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>`;
+    <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>
+    <div class="spinner"></div>`;
 
   const cacheLast = convertPathCache.at(-1);
   if (cacheLast) files = cacheLast.files;
@@ -325,6 +339,14 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
   const start = cacheLast ? convertPathCache.length : 0;
   for (let i = start; i < path.length - 1; i ++) {
     const handler = path[i + 1].handler;
+    
+    // Update progress
+    const progress = Math.round(((i + 1) / (path.length - 1)) * 100);
+    ui.popupBox.innerHTML = `<h2>Converting... ${progress}%</h2>
+      <p>Step ${i + 1}/${path.length - 1}: <b>${path[i].format.format} → ${path[i + 1].format.format}</b></p>
+      <progress value="${progress}" max="100"></progress>
+      <div class="spinner"></div>`;
+    
     try {
       let supportedFormats = window.supportedFormatCache.get(handler.name);
       if (!handler.ready) {
@@ -435,9 +457,13 @@ async function buildConvertPath (
 function downloadFile (bytes: Uint8Array, name: string, mime: string) {
   const blob = new Blob([bytes as BlobPart], { type: mime });
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  link.href = url;
   link.download = name;
   link.click();
+  
+  // Cleanup to prevent memory leaks
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 ui.convertButton.onclick = async function () {
@@ -486,6 +512,24 @@ ui.convertButton.onclick = async function () {
       downloadFile(file.bytes, file.name, outputFormat.mime);
     }
 
+    // Save to conversion history
+    try {
+      const history = JSON.parse(localStorage.getItem('conversion-history') || '[]');
+      history.unshift({
+        timestamp: Date.now(),
+        from: inputOption.format.format,
+        fromMime: inputFormat.mime,
+        to: outputOption.format.format,
+        toMime: outputFormat.mime,
+        files: output.files.length,
+        path: output.path.map(c => c.format.format).join(' → ')
+      });
+      // Keep only last 50 conversions
+      localStorage.setItem('conversion-history', JSON.stringify(history.slice(0, 50)));
+    } catch (error) {
+      console.warn('Failed to save conversion history:', error);
+    }
+
     window.showPopup(
       `<h2>Converted ${inputOption.format.format} to ${outputOption.format.format}!</h2>` +
       `<p>Path used: <b>${output.path.map(c => c.format.format).join(" → ")}</b>.</p>\n` +
@@ -500,4 +544,65 @@ ui.convertButton.onclick = async function () {
 
   }
 
+};
+// Keyboard shortcuts
+document.addEventListener('keydown', (event) => {
+  // Ctrl/Cmd + V to paste file
+  if ((event.ctrlKey || event.metaKey) && event.key === 'v') {
+    navigator.clipboard.read().then(items => {
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/') || type.startsWith('video/')) {
+            item.getType(type).then(blob => {
+              const file = new File([blob], 'pasted-file', { type });
+              selectedFiles = [file];
+              ui.fileSelectArea.innerHTML = `<h2>${file.name}</h2>`;
+            });
+            break;
+          }
+        }
+      }
+    }).catch(() => {
+      // Clipboard API not available or permission denied
+    });
+  }
+  
+  // Enter to convert (if both formats selected)
+  if (event.key === 'Enter' && ui.convertButton.className !== 'disabled') {
+    ui.convertButton.click();
+  }
+  
+  // Escape to close popup
+  if (event.key === 'Escape') {
+    window.hidePopup();
+  }
+});
+
+// Add function to view conversion history
+(window as typeof window & { showConversionHistory: () => void }).showConversionHistory = () => {
+  try {
+    const history = JSON.parse(localStorage.getItem('conversion-history') || '[]');
+    if (history.length === 0) {
+      window.showPopup('<h2>Conversion History</h2><p>No conversions yet.</p><button onclick=\"window.hidePopup()\">OK</button>');
+      return;
+    }
+    
+    const historyHTML = history.slice(0, 10).map((item: {
+      timestamp: number;
+      from: string;
+      to: string;
+      files: number;
+      path: string;
+    }) => {
+      const date = new Date(item.timestamp).toLocaleString();
+      return `<li><b>${item.from} → ${item.to}</b> (${item.files} file${item.files > 1 ? 's' : ''})<br><small>${date}</small></li>`;
+    }).join('');
+    
+    window.showPopup(
+      `<h2>Recent Conversions</h2><ul style="text-align: left; max-height: 400px; overflow-y: auto;">${historyHTML}</ul>` +
+      `<button onclick="window.hidePopup()">OK</button>`
+    );
+  } catch (error) {
+    console.error('Failed to load conversion history:', error);
+  }
 };
