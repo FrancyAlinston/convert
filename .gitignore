@@ -1,6 +1,56 @@
-bun.lock
+# Dependencies
+node_modules/
 package-lock.json
-node_modules
-start.sh
-dist
+bun.lock
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Cache files
 cache.json
+.cache/
+.eslintcache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_esm/
+.rts2_cache_umd/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.env.local
+.env.*.local
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# Development scripts
+start.sh
+
+# Temporary files
+*.tmp
+*.temp
+.env
+
+# Environment variables
+.env
+.env.local
+.env.*.local
