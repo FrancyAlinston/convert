@@ -5,8 +5,8 @@ import logger, { LogLevel } from "./logger.js";
 
 const log = logger.scoped("Main");
 
-/** Maximum file size in bytes (500MB) */
-const MAX_FILE_SIZE = 500 * 1024 * 1024;
+/** Maximum file size in bytes (1GB) */
+const MAX_FILE_SIZE = 1024 * 1024 * 1024;
 
 /** Files currently selected for conversion */
 let selectedFiles: File[] = [];
