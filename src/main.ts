@@ -307,6 +307,11 @@ async function buildOptionList () {
   } finally {
     await buildOptionList();
     console.log("Built initial format list.");
+    console.info(
+      "%cℹ️ Browser-based conversions use software decoding.\n" +
+      "Hardware acceleration warnings are normal and expected.",
+      "color: #1C77FF; font-weight: bold;"
+    );
   }
 })();
 
@@ -364,8 +369,15 @@ async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
       if (files.some(c => !c.bytes.length)) throw "Output is empty.";
       convertPathCache.push({ files, node: path[i + 1] });
     } catch (e) {
-      console.log(path.map(c => c.format.format));
-      console.error(handler.name, `${path[i].format.format} → ${path[i + 1].format.format}`, e);
+      // Improved error logging with context
+      const errorMsg = String(e);
+      
+      // Only log detailed errors for non-common issues
+      if (!errorMsg.includes("FS error") && !errorMsg.includes("hardware accelerated")) {
+        console.log(path.map(c => c.format.format));
+        console.error(handler.name, `${path[i].format.format} → ${path[i + 1].format.format}`, e);
+      }
+      
       return null;
     }
   }

@@ -13,10 +13,52 @@ class FFmpegHandler implements FormatHandler {
   public ready: boolean = false;
 
   #ffmpeg?: FFmpeg;
+  #suppressedWarnings = new Set<string>();
+  #warningCount = new Map<string, number>();
 
   #stdout: string = "";
   handleStdout (log: LogEvent) {
     this.#stdout += log.message + "\n";
+  }
+  
+  /**
+   * Filter out repetitive warning messages to reduce console spam.
+   * @param log Log event from FFmpeg
+   */
+  handleFilteredLog (log: LogEvent) {
+    const msg = log.message;
+    
+    // Suppress hardware acceleration warnings (these are expected in browser)
+    if (msg.includes("hardware accelerated") || msg.includes("suppport hardware")) {
+      const key = msg.trim();
+      const count = this.#warningCount.get(key) || 0;
+      
+      // Only log the first occurrence
+      if (count === 0) {
+        console.warn("[FFmpeg] Hardware acceleration not available (browser limitation - using software decoding)");
+        this.#warningCount.set(key, 1);
+      }
+      return; // Don't log to console
+    }
+    
+    // Suppress FS error spam
+    if (msg.includes("FS error")) {
+      const key = "FS error";
+      const count = this.#warningCount.get(key) || 0;
+      if (count === 0) {
+        console.warn("[FFmpeg] File system errors detected (may affect some conversions)");
+        this.#warningCount.set(key, 1);
+      }
+      return;
+    }
+    
+    // Log everything else normally
+    if (log.type === 'fferr') {
+      console.error("[FFmpeg]", msg);
+    } else if (msg.trim()) {
+      // Only log non-empty messages
+      console.log("[FFmpeg]", msg);
+    }
   }
   clearStdout () {
     this.#stdout = "";
@@ -83,6 +125,10 @@ class FFmpegHandler implements FormatHandler {
   async init () {
 
     this.#ffmpeg = new FFmpeg();
+    
+    // Set up filtered logging to reduce console spam
+    this.#ffmpeg.on("log", this.handleFilteredLog.bind(this));
+    
     await this.loadFFmpeg();
 
     const getMuxerDetails = async (muxer: string) => {
