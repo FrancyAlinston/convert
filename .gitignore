@@ -54,3 +54,6 @@ start.sh
 .env
 .env.local
 .env.*.local
+
+# Documentation
+PROJECT_ANALYSIS.md
