@@ -149,12 +149,14 @@ button.selected {
   position: fixed;
   left: 50%;
   top: 50%;
-  width: 20vw;
+  width: min(90vw, 56rem);
+  max-height: 85vh;
   transform: translate(-50%, -50%);
   background-color: white;
   padding: 15px;
   border-radius: 10px;
   text-align: center;
+  overflow: hidden;
 }
 
 #popup button {
@@ -165,6 +167,41 @@ button.selected {
   background-color: lightgray;
   color: black;
   cursor: pointer;
+}
+
+#popup button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.popup-download-list {
+  margin: 10px 0;
+  border: 1px solid #d5d5d5;
+  border-radius: 10px;
+  max-height: 48vh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.popup-download-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.popup-download-row:nth-child(odd) {
+  background-color: #f3f3f3;
+}
+
+.popup-download-name {
+  font-family: monospace;
+  word-break: break-word;
+}
+
+.popup-actions {
+  margin-top: 8px;
 }
 
 @media only screen and (max-width: 800px) {
@@ -183,7 +220,15 @@ button.selected {
     flex-flow: column nowrap;
   }
   #popup {
-    width: 80vw;
+    width: 90vw;
+    max-height: 90vh;
+  }
+  .popup-download-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .popup-download-name {
+    text-align: left;
   }
   #side-panel {
     width: 50%;
