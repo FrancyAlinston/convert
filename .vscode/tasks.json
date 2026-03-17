@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Vite app",
+			"type": "shell",
+			"command": "npm install && npm run dev -- --host 0.0.0.0 --port 5173",
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}
