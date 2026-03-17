@@ -201,6 +201,10 @@ button.selected {
 }
 
 .popup-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
   margin-top: 8px;
 }
 

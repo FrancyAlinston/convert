@@ -7,6 +7,7 @@ declare global {
     showPopup: (html: string) => void;
     hidePopup: () => void;
     downloadConvertedFile: (index: number) => void;
+    downloadAllConvertedAsZip: () => void;
   }
 }
 

@@ -1,4 +1,5 @@
 import type { FileFormat, FileData, FormatHandler, ConvertPathNode } from "./FormatHandler.js";
+import JSZip from "jszip";
 import normalizeMimeType from "./normalizeMimeType.js";
 import handlers from "./handlers";
 
@@ -178,8 +179,6 @@ window.hidePopup = function () {
 
 const allOptions: Array<{ format: FileFormat, handler: FormatHandler }> = [];
 
-const CONVERT_BATCH_SIZE = 50;
-
 type DownloadEntry = {
   bytes: Uint8Array;
   name: string;
@@ -188,6 +187,13 @@ type DownloadEntry = {
 
 const pendingDownloads: DownloadEntry[] = [];
 const downloadedIndexes = new Set<number>();
+let pendingDownloadZipName = "converted_files.zip";
+
+const conversionProgress = {
+  finishedInputs: 0,
+  totalInputs: 0,
+  generatedOutputs: 0
+};
 
 function escapeHTML (value: string): string {
   return value
@@ -198,30 +204,31 @@ function escapeHTML (value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function showBatchProgress (
-  batchIndex: number,
-  totalBatches: number,
-  finishedInputs: number,
-  totalInputs: number,
-  generatedOutputs: number
-) {
-  const percent = totalInputs > 0
-    ? Math.floor((finishedInputs / totalInputs) * 100)
+function sanitizeFilenamePart (value: string): string {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
+  return sanitized || "files";
+}
+
+function renderConversionProgress (title: string, details: string) {
+  const percent = conversionProgress.totalInputs > 0
+    ? Math.floor((conversionProgress.finishedInputs / conversionProgress.totalInputs) * 100)
     : 100;
 
   window.showPopup(
-    `<h2>Converting files...</h2>` +
-    `<p>Batch <b>${batchIndex}</b> / <b>${totalBatches}</b> (up to ${CONVERT_BATCH_SIZE} files).</p>` +
-    `<p>Finished <b>${finishedInputs}</b> / <b>${totalInputs}</b> input files (${percent}%).</p>` +
-    `<p>Generated <b>${generatedOutputs}</b> output files so far.</p>`
+    `<h2>${escapeHTML(title)}</h2>` +
+    `<p>Finished <b>${conversionProgress.finishedInputs}</b> / <b>${conversionProgress.totalInputs}</b> input files (${percent}%).</p>` +
+    `<p>Generated <b>${conversionProgress.generatedOutputs}</b> output files so far.</p>` +
+    `<p>${escapeHTML(details)}</p>`
   );
 }
 
 function showDownloadPopup (
   inputLabel: string,
   outputLabel: string,
-  totalInputs: number,
-  totalBatches: number,
   routeLabels: string[]
 ) {
   const routeSummary = routeLabels.length === 1
@@ -237,13 +244,18 @@ function showDownloadPopup (
     )).join("")
     : `<p>No output files were generated.</p>`;
 
+  const actionsHTML = pendingDownloads.length > 0
+    ? `<button id="download-all-zip" onclick="window.downloadAllConvertedAsZip()">Download all as ZIP</button>` +
+      `<button onclick="window.hidePopup()">Close</button>`
+    : `<button onclick="window.hidePopup()">Close</button>`;
+
   window.showPopup(
     `<h2>Converted ${escapeHTML(inputLabel)} to ${escapeHTML(outputLabel)}!</h2>` +
-    `<p>Finished <b>${totalInputs}</b> input files in <b>${totalBatches}</b> batch${totalBatches === 1 ? "" : "es"}.</p>` +
-    `<p>Output files: <b>${pendingDownloads.length}</b>. Downloaded: <b id="downloaded-count">0</b> / <b>${pendingDownloads.length}</b>.</p>` +
+    `<p>Finished input files: <b>${conversionProgress.finishedInputs}</b> / <b>${conversionProgress.totalInputs}</b>.</p>` +
+    `<p>Output files: <b>${pendingDownloads.length}</b>. Downloaded individually: <b id="downloaded-count">0</b> / <b>${pendingDownloads.length}</b>.</p>` +
     routeSummary +
     `<div class="popup-download-list">${listHTML}</div>` +
-    `<div class="popup-actions"><button onclick="window.hidePopup()">Close</button></div>`
+    `<div class="popup-actions">${actionsHTML}</div>`
   );
 }
 
@@ -385,8 +397,8 @@ const convertPathCache: Array<{
 
 async function attemptConvertPath (files: FileData[], path: ConvertPathNode[]) {
 
-  ui.popupBox.innerHTML = `<h2>Finding conversion route...</h2>
-    <p>Trying <b>${path.map(c => c.format.format).join(" → ")}</b>...</p>`;
+  const route = path.map(c => c.format.format).join(" -> ");
+  renderConversionProgress("Converting files...", `Trying route: ${route}`);
 
   const cacheLast = convertPathCache.at(-1);
   if (cacheLast) files = cacheLast.files;
@@ -509,6 +521,13 @@ function downloadFile (bytes: Uint8Array, name: string, mime: string) {
   link.click();
 }
 
+function updateDownloadedCounter () {
+  const counter = document.querySelector("#downloaded-count");
+  if (counter instanceof HTMLElement) {
+    counter.textContent = downloadedIndexes.size.toString();
+  }
+}
+
 window.downloadConvertedFile = function (index: number) {
   if (downloadedIndexes.has(index)) return;
   const entry = pendingDownloads[index];
@@ -523,10 +542,39 @@ window.downloadConvertedFile = function (index: number) {
     button.disabled = true;
   }
 
-  const counter = document.querySelector("#downloaded-count");
-  if (counter instanceof HTMLElement) {
-    counter.textContent = downloadedIndexes.size.toString();
+  updateDownloadedCounter();
+}
+
+window.downloadAllConvertedAsZip = async function () {
+  if (pendingDownloads.length === 0) return;
+
+  const button = document.querySelector("#download-all-zip");
+  if (!(button instanceof HTMLButtonElement)) return;
+
+  const defaultText = "Download all as ZIP";
+  button.disabled = true;
+  button.textContent = "Building ZIP...";
+
+  try {
+    const zip = new JSZip();
+    for (const file of pendingDownloads) {
+      zip.file(file.name, file.bytes);
+    }
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    downloadFile(bytes, pendingDownloadZipName, "application/zip");
+    button.textContent = "ZIP downloaded";
+  } catch (e) {
+    console.error(e);
+    alert("Failed to create ZIP archive.");
+    button.textContent = defaultText;
+    button.disabled = false;
+    return;
   }
+
+  setTimeout(() => {
+    button.textContent = defaultText;
+    button.disabled = false;
+  }, 1000);
 }
 
 ui.convertButton.onclick = async function () {
@@ -554,6 +602,10 @@ ui.convertButton.onclick = async function () {
     pendingDownloads.length = 0;
     downloadedIndexes.clear();
 
+    conversionProgress.finishedInputs = 0;
+    conversionProgress.totalInputs = inputFiles.length;
+    conversionProgress.generatedOutputs = 0;
+
     const inputFileData: FileData[] = [];
     for (let i = 0; i < inputFiles.length; i ++) {
       const inputFile = inputFiles[i];
@@ -563,66 +615,49 @@ ui.convertButton.onclick = async function () {
 
       window.showPopup(
         `<h2>Preparing files...</h2>` +
-        `<p>Loaded <b>${i + 1}</b> / <b>${inputFiles.length}</b> input files.</p>`
+        `<p>Loaded <b>${i + 1}</b> / <b>${inputFiles.length}</b> input files.</p>` +
+        `<p>Finished <b>${conversionProgress.finishedInputs}</b> / <b>${conversionProgress.totalInputs}</b> input files.</p>`
       );
     }
 
-    const batches: FileData[][] = [];
-    for (let i = 0; i < inputFileData.length; i += CONVERT_BATCH_SIZE) {
-      batches.push(inputFileData.slice(i, i + CONVERT_BATCH_SIZE));
-    }
+    conversionProgress.totalInputs = inputFileData.length;
+    pendingDownloadZipName = `converted-${sanitizeFilenamePart(inputOption.format.format)}-to-${sanitizeFilenamePart(outputOption.format.format)}.zip`;
 
-    let finishedInputs = 0;
     const routeLabels = new Set<string>();
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex ++) {
+    renderConversionProgress("Converting files...", "Starting conversion.");
 
-      const batch = batches[batchIndex];
-      showBatchProgress(
-        batchIndex + 1,
-        batches.length,
-        finishedInputs,
-        inputFileData.length,
-        pendingDownloads.length
-      );
-
-      if (inputFormat.mime === outputFormat.mime) {
-        for (const file of batch) {
-          pendingDownloads.push({
-            bytes: file.bytes,
-            name: file.name,
-            mime: inputFormat.mime
-          });
-        }
-        routeLabels.add("No conversion needed (same format)");
-      } else {
-        const output = await buildConvertPath(batch, outputOption, [[inputOption]]);
-        if (!output) {
-          window.hidePopup();
-          alert("Failed to find conversion route.");
-          return;
-        }
-
-        routeLabels.add(output.path.map(c => c.format.format).join(" -> "));
-
-        for (const file of output.files) {
-          pendingDownloads.push({
-            bytes: file.bytes,
-            name: file.name,
-            mime: outputFormat.mime
-          });
-        }
+    if (inputFormat.mime === outputFormat.mime) {
+      for (const file of inputFileData) {
+        pendingDownloads.push({
+          bytes: file.bytes,
+          name: file.name,
+          mime: inputFormat.mime
+        });
+      }
+      routeLabels.add("No conversion needed (same format)");
+    } else {
+      const output = await buildConvertPath(inputFileData, outputOption, [[inputOption]]);
+      if (!output) {
+        window.hidePopup();
+        alert("Failed to find conversion route.");
+        return;
       }
 
-      finishedInputs += batch.length;
-      showBatchProgress(
-        batchIndex + 1,
-        batches.length,
-        finishedInputs,
-        inputFileData.length,
-        pendingDownloads.length
-      );
+      routeLabels.add(output.path.map(c => c.format.format).join(" -> "));
+
+      for (const file of output.files) {
+        pendingDownloads.push({
+          bytes: file.bytes,
+          name: file.name,
+          mime: outputFormat.mime
+        });
+      }
     }
+
+    conversionProgress.finishedInputs = conversionProgress.totalInputs;
+    conversionProgress.generatedOutputs = pendingDownloads.length;
+    renderConversionProgress("Finalizing results...", "Sorting output files.");
 
     pendingDownloads.sort((a, b) => (
       a.name.localeCompare(b.name, undefined, {
@@ -634,8 +669,6 @@ ui.convertButton.onclick = async function () {
     showDownloadPopup(
       inputOption.format.format,
       outputOption.format.format,
-      inputFileData.length,
-      batches.length,
       Array.from(routeLabels)
     );
 
