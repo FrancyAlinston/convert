@@ -192,7 +192,8 @@ let pendingDownloadZipName = "converted_files.zip";
 const conversionProgress = {
   finishedInputs: 0,
   totalInputs: 0,
-  generatedOutputs: 0
+  generatedOutputs: 0,
+  failedInputs: 0
 };
 
 function escapeHTML (value: string): string {
@@ -213,15 +214,33 @@ function sanitizeFilenamePart (value: string): string {
   return sanitized || "files";
 }
 
+function shouldConvertEachInput (
+  inputFormat: FileFormat,
+  outputFormat: FileFormat,
+  inputCount: number
+): boolean {
+  if (inputCount <= 1) return false;
+  if (inputFormat.mime === outputFormat.mime) return false;
+  if (outputFormat.mime === "application/zip") return false;
+  if (outputFormat.mime.startsWith("audio/")) return false;
+  if (outputFormat.mime.startsWith("video/")) return false;
+  return true;
+}
+
 function renderConversionProgress (title: string, details: string) {
   const percent = conversionProgress.totalInputs > 0
     ? Math.floor((conversionProgress.finishedInputs / conversionProgress.totalInputs) * 100)
     : 100;
 
+  const failedLine = conversionProgress.failedInputs > 0
+    ? `<p>Failed <b>${conversionProgress.failedInputs}</b> input files so far.</p>`
+    : "";
+
   window.showPopup(
     `<h2>${escapeHTML(title)}</h2>` +
     `<p>Finished <b>${conversionProgress.finishedInputs}</b> / <b>${conversionProgress.totalInputs}</b> input files (${percent}%).</p>` +
     `<p>Generated <b>${conversionProgress.generatedOutputs}</b> output files so far.</p>` +
+    failedLine +
     `<p>${escapeHTML(details)}</p>`
   );
 }
@@ -229,11 +248,20 @@ function renderConversionProgress (title: string, details: string) {
 function showDownloadPopup (
   inputLabel: string,
   outputLabel: string,
-  routeLabels: string[]
+  routeLabels: string[],
+  failedInputs: number
 ) {
+  const title = failedInputs > 0
+    ? `Conversion finished: ${escapeHTML(inputLabel)} to ${escapeHTML(outputLabel)}`
+    : `Converted ${escapeHTML(inputLabel)} to ${escapeHTML(outputLabel)}!`;
+
   const routeSummary = routeLabels.length === 1
     ? `<p>Path used: <b>${escapeHTML(routeLabels[0])}</b>.</p>`
-    : `<p>Paths used: <b>${routeLabels.length}</b> routes (varies by batch).</p>`;
+    : `<p>Paths used: <b>${routeLabels.length}</b> routes (varies by input file).</p>`;
+
+  const failedSummary = failedInputs > 0
+    ? `<p>Failed input files: <b>${failedInputs}</b>.</p>`
+    : "";
 
   const listHTML = pendingDownloads.length > 0
     ? pendingDownloads.map((file, index) => (
@@ -250,9 +278,10 @@ function showDownloadPopup (
     : `<button onclick="window.hidePopup()">Close</button>`;
 
   window.showPopup(
-    `<h2>Converted ${escapeHTML(inputLabel)} to ${escapeHTML(outputLabel)}!</h2>` +
+    `<h2>${title}</h2>` +
     `<p>Finished input files: <b>${conversionProgress.finishedInputs}</b> / <b>${conversionProgress.totalInputs}</b>.</p>` +
     `<p>Output files: <b>${pendingDownloads.length}</b>. Downloaded individually: <b id="downloaded-count">0</b> / <b>${pendingDownloads.length}</b>.</p>` +
+    failedSummary +
     routeSummary +
     `<div class="popup-download-list">${listHTML}</div>` +
     `<div class="popup-actions">${actionsHTML}</div>`
@@ -605,6 +634,7 @@ ui.convertButton.onclick = async function () {
     conversionProgress.finishedInputs = 0;
     conversionProgress.totalInputs = inputFiles.length;
     conversionProgress.generatedOutputs = 0;
+    conversionProgress.failedInputs = 0;
 
     const inputFileData: FileData[] = [];
     for (let i = 0; i < inputFiles.length; i ++) {
@@ -624,8 +654,14 @@ ui.convertButton.onclick = async function () {
     pendingDownloadZipName = `converted-${sanitizeFilenamePart(inputOption.format.format)}-to-${sanitizeFilenamePart(outputOption.format.format)}.zip`;
 
     const routeLabels = new Set<string>();
+    const convertEachInput = shouldConvertEachInput(inputFormat, outputFormat, inputFileData.length);
 
-    renderConversionProgress("Converting files...", "Starting conversion.");
+    renderConversionProgress(
+      "Converting files...",
+      convertEachInput
+        ? "Converting each input file separately."
+        : "Starting conversion."
+    );
 
     if (inputFormat.mime === outputFormat.mime) {
       for (const file of inputFileData) {
@@ -635,7 +671,43 @@ ui.convertButton.onclick = async function () {
           mime: inputFormat.mime
         });
       }
+      conversionProgress.finishedInputs = conversionProgress.totalInputs;
+      conversionProgress.generatedOutputs = pendingDownloads.length;
       routeLabels.add("No conversion needed (same format)");
+    } else if (convertEachInput) {
+      for (let i = 0; i < inputFileData.length; i ++) {
+        const file = inputFileData[i];
+        renderConversionProgress(
+          "Converting files...",
+          `Converting ${file.name} (${i + 1}/${inputFileData.length}).`
+        );
+
+        const output = await buildConvertPath([file], outputOption, [[inputOption]]);
+        conversionProgress.finishedInputs = i + 1;
+
+        if (!output) {
+          conversionProgress.failedInputs += 1;
+          continue;
+        }
+
+        routeLabels.add(output.path.map(c => c.format.format).join(" -> "));
+
+        for (const outputFile of output.files) {
+          pendingDownloads.push({
+            bytes: outputFile.bytes,
+            name: outputFile.name,
+            mime: outputFormat.mime
+          });
+        }
+
+        conversionProgress.generatedOutputs = pendingDownloads.length;
+      }
+
+      if (pendingDownloads.length === 0) {
+        window.hidePopup();
+        alert("Failed to convert all input files.");
+        return;
+      }
     } else {
       const output = await buildConvertPath(inputFileData, outputOption, [[inputOption]]);
       if (!output) {
@@ -653,9 +725,14 @@ ui.convertButton.onclick = async function () {
           mime: outputFormat.mime
         });
       }
+
+      conversionProgress.finishedInputs = conversionProgress.totalInputs;
+      conversionProgress.generatedOutputs = pendingDownloads.length;
     }
 
-    conversionProgress.finishedInputs = conversionProgress.totalInputs;
+    if (conversionProgress.finishedInputs < conversionProgress.totalInputs) {
+      conversionProgress.finishedInputs = conversionProgress.totalInputs;
+    }
     conversionProgress.generatedOutputs = pendingDownloads.length;
     renderConversionProgress("Finalizing results...", "Sorting output files.");
 
@@ -669,7 +746,8 @@ ui.convertButton.onclick = async function () {
     showDownloadPopup(
       inputOption.format.format,
       outputOption.format.format,
-      Array.from(routeLabels)
+      Array.from(routeLabels),
+      conversionProgress.failedInputs
     );
 
   } catch (e) {
